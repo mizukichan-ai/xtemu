@@ -1,0 +1,22 @@
+# Build artifacts
+xtemu
+*.o
+*.dSYM
+
+# IDE files
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+
+# Debug builds
+debug/
+*.dSYM/
