@@ -29,7 +29,49 @@ typedef enum {
     OP_IN = 0xE4,
     OP_OUT = 0xE6,
     OP_STI = 0xFB,
-    OP_CLI = 0xFA
+    OP_CLI = 0xFA,
+    /* Additional opcodes for Phase 2 */
+    OP_ADC = 0x14,
+    OP_SBB = 0x1C,
+    OP_DAA = 0x27,
+    OP_AAS = 0x2F,
+    OP_XCHG = 0x87,
+    OP_CBW = 0x98,
+    OP_CWD = 0x99,
+    OP_SAL = 0xC0,
+    OP_SHL = 0xC0,
+    OP_SAR = 0xC0,
+    OP_SHR = 0xC0,
+    OP_ROL = 0xC0,
+    OP_ROR = 0xC0,
+    OP_RCL = 0xC0,
+    OP_RCR = 0xC0,
+    OP_TEST = 0xF6,
+    OP_NEG = 0xF6,
+    OP_MUL = 0xF6,
+    OP_IMUL = 0xF6,
+    OP_DIV = 0xF6,
+    OP_IDIV = 0xF6,
+    OP_MOVSB = 0xA4,
+    OP_MOVSW = 0xA5,
+    OP_CMPSB = 0xA6,
+    OP_CMPSW = 0xA7,
+    OP_SCASB = 0xAE,
+    OP_SCASW = 0xAF,
+    OP_LODSB = 0xAC,
+    OP_LODSW = 0xAD,
+    OP_STOSB = 0xAA,
+    OP_STOSW = 0xAB,
+    OP_STC = 0xF9,
+    OP_CLC = 0xF8,
+    OP_CMC = 0xF5,
+    OP_STD = 0xFD,
+    OP_CLD = 0xFC,
+    OP_LAHF = 0x9F,
+    OP_SAHF = 0x9E,
+    OP_LOOPNE = 0xE0,
+    OP_LOOPE = 0xE1,
+    OP_JCXZ = 0xE3
 } xt_opcode_t;
 
 /* Initialize emulator */
@@ -247,6 +289,308 @@ void xt_step(xt_emulator_t *emu) {
             emu->cpu.ax = imm16;
             emu->cpu.ip += 3;
             emu->cpu.cycles += 4;
+            break;
+            
+        /* Arithmetic Instructions */
+        case 0x14: /* ADD AL,imm8 */
+            /* Add immediate to AL */
+            uint8_t adc_imm = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t al_old = emu->cpu.ax & 0xFF;
+            uint8_t adc_cf = (emu->cpu.flags & 0x0001) ? 1 : 0;
+            uint16_t result = al_old + adc_imm + adc_cf;
+            emu->cpu.ax = (emu->cpu.ax & 0xFF00) | (result & 0xFF);
+            emu->cpu.flags = (emu->cpu.flags & ~0x0001) | ((result & 0x100) ? 0x0001 : 0);
+            emu->cpu.flags |= (result == 0) ? 0x0040 : 0;
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0x1C: /* SBB AL,imm8 */
+            /* Subtract with borrow immediate from AL */
+            uint8_t sbb_imm = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t al_val = emu->cpu.ax & 0xFF;
+            uint8_t sbb_cf = (emu->cpu.flags & 0x0001) ? 1 : 0;
+            uint16_t sbb_result = al_val - sbb_imm - sbb_cf;
+            emu->cpu.ax = (emu->cpu.ax & 0xFF00) | (sbb_result & 0xFF);
+            emu->cpu.flags = (emu->cpu.flags & ~0x0001) | ((sbb_result & 0x100) ? 0x0001 : 0);
+            emu->cpu.flags |= (sbb_result == 0) ? 0x0040 : 0;
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0x27: /* DAA - Decimal Adjust AL */
+            /* Decimal adjust AL after addition */
+            uint8_t al = emu->cpu.ax & 0xFF;
+            if ((emu->cpu.flags & 0x0004) || (al & 0x0F) > 9) {
+                al += 6;
+                emu->cpu.flags |= 0x0001;
+            }
+            if ((emu->cpu.flags & 0x0001) || (al & 0xF0) > 0x90) {
+                al += 0x60;
+                emu->cpu.flags |= 0x0001;
+            }
+            emu->cpu.ax = (emu->cpu.ax & 0xFF00) | (al & 0xFF);
+            emu->cpu.flags |= (al == 0) ? 0x0040 : 0;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0x2F: /* AAS - ASCII Adjust AL */
+            /* ASCII adjust AL after subtraction */
+            uint8_t aas_al = emu->cpu.ax & 0xFF;
+            if ((emu->cpu.flags & 0x0004) || (aas_al & 0x0F) > 9) {
+                aas_al -= 6;
+                emu->cpu.flags |= 0x0001;
+            }
+            if ((emu->cpu.flags & 0x0001) || (aas_al & 0xF0) > 0x90) {
+                aas_al -= 0x60;
+                emu->cpu.flags |= 0x0001;
+            }
+            emu->cpu.ax = (emu->cpu.ax & 0xFF00) | (aas_al & 0xFF);
+            emu->cpu.flags |= (aas_al == 0) ? 0x0040 : 0;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 4;
+            break;
+            
+        /* Logical Instructions */
+        case 0xF6: /* Various 8-bit operations */
+            /* Decode based on mod/rm byte */
+            uint8_t mod_rm = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t reg = (mod_rm >> 3) & 0x07;
+            
+            switch (reg) {
+                case 2: /* NEG - Negate operand */
+                    /* For now, negate AL */
+                    uint8_t neg_val = ~(emu->cpu.ax & 0xFF) + 1;
+                    emu->cpu.ax = (emu->cpu.ax & 0xFF00) | (neg_val & 0xFF);
+                    emu->cpu.flags |= (neg_val == 0) ? 0x0040 : 0;
+                    emu->cpu.flags |= (neg_val == 0x80) ? 0x0001 : 0;
+                    break;
+                case 4: /* MUL - Unsigned multiplication */
+                    /* AL * operand -> AX */
+                    uint8_t mul_val = emu->cpu.ax & 0xFF;
+                    uint16_t mul_result = mul_val * mul_val;
+                    emu->cpu.ax = mul_result;
+                    emu->cpu.flags = (mul_result == 0) ? 0 : 0x0001;
+                    break;
+                case 5: /* IMUL - Signed multiplication */
+                    /* AL * operand -> AX */
+                    int8_t imul_val = emu->cpu.ax & 0xFF;
+                    int16_t imul_result = imul_val * imul_val;
+                    emu->cpu.ax = imul_result;
+                    emu->cpu.flags = (imul_result == 0) ? 0 : 0x0001;
+                    break;
+                case 6: /* DIV - Unsigned division */
+                    /* AX / operand -> AL, remainder -> AH */
+                    uint8_t div_val = emu->cpu.ax & 0xFF;
+                    if (div_val == 0) {
+                        emu->cpu.flags |= 0x0001; /* Division by zero */
+                    } else {
+                        uint8_t al = emu->cpu.ax / div_val;
+                        uint8_t ah = emu->cpu.ax % div_val;
+                        emu->cpu.ax = (ah << 8) | al;
+                    }
+                    break;
+                case 7: /* IDIV - Signed division */
+                    /* AX / operand -> AL, remainder -> AH */
+                    int8_t idiv_val = emu->cpu.ax & 0xFF;
+                    if (idiv_val == 0) {
+                        emu->cpu.flags |= 0x0001; /* Division by zero */
+                    } else {
+                        int8_t al = emu->cpu.ax / idiv_val;
+                        int8_t ah = emu->cpu.ax % idiv_val;
+                        emu->cpu.ax = (ah << 8) | (al & 0xFF);
+                    }
+                    break;
+                case 0: /* TEST AL,imm8 */
+                    uint8_t test_imm = emu->memory.bios_rom[cs_ip + 2];
+                    uint8_t test_result = (emu->cpu.ax & 0xFF) & test_imm;
+                    emu->cpu.flags = (test_result == 0) ? 0x0040 : 0;
+                    emu->cpu.ip += 3;
+                    emu->cpu.cycles += 5;
+                    break;
+            }
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 17;
+            break;
+            
+        /* String Instructions */
+        case 0xA4: /* MOVSB - Move byte string */
+            /* Move byte from [DS:SI] to [ES:DI] */
+            uint8_t movsb_val = emu->memory.ram[emu->cpu.ds + emu->cpu.si];
+            emu->memory.ram[emu->cpu.es + emu->cpu.di] = movsb_val;
+            emu->cpu.si += (emu->cpu.flags & 0x0004) ? -1 : 1;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -1 : 1;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 18;
+            break;
+            
+        case 0xA5: /* MOVSW - Move word string */
+            /* Move word from [DS:SI] to [ES:DI] */
+            uint16_t movsw_val = *(uint16_t*)(emu->memory.ram + emu->cpu.ds + emu->cpu.si);
+            *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di) = movsw_val;
+            emu->cpu.si += (emu->cpu.flags & 0x0004) ? -2 : 2;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -2 : 2;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 18;
+            break;
+            
+        case 0xA6: /* CMPSB - Compare byte string */
+            /* Compare [DS:SI] with [ES:DI] */
+            uint8_t cmpsb_val1 = emu->memory.ram[emu->cpu.ds + emu->cpu.si];
+            uint8_t cmpsb_val2 = emu->memory.ram[emu->cpu.es + emu->cpu.di];
+            uint16_t cmpsb_result = cmpsb_val1 - cmpsb_val2;
+            emu->cpu.flags = (cmpsb_result == 0) ? 0x0040 : 0;
+            emu->cpu.flags |= (cmpsb_result & 0x100) ? 0x0001 : 0;
+            emu->cpu.si += (emu->cpu.flags & 0x0004) ? -1 : 1;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -1 : 1;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 22;
+            break;
+            
+        case 0xA7: /* CMPSW - Compare word string */
+            /* Compare [DS:SI] with [ES:DI] */
+            uint16_t cmpsw_val1 = *(uint16_t*)(emu->memory.ram + emu->cpu.ds + emu->cpu.si);
+            uint16_t cmpsw_val2 = *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di);
+            uint32_t cmpsw_result = cmpsw_val1 - cmpsw_val2;
+            emu->cpu.flags = (cmpsw_result == 0) ? 0x0040 : 0;
+            emu->cpu.flags |= (cmpsw_result & 0x10000) ? 0x0001 : 0;
+            emu->cpu.si += (emu->cpu.flags & 0x0004) ? -2 : 2;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -2 : 2;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 22;
+            break;
+            
+        case 0xAC: /* LODSB - Load byte string */
+            /* Load byte from [DS:SI] to AL */
+            uint8_t lodsb_val = emu->memory.ram[emu->cpu.ds + emu->cpu.si];
+            emu->cpu.ax = (emu->cpu.ax & 0xFF00) | lodsb_val;
+            emu->cpu.si += (emu->cpu.flags & 0x0004) ? -1 : 1;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 12;
+            break;
+            
+        case 0xAD: /* LODSW - Load word string */
+            /* Load word from [DS:SI] to AX */
+            uint16_t lodsw_val = *(uint16_t*)(emu->memory.ram + emu->cpu.ds + emu->cpu.si);
+            emu->cpu.ax = lodsw_val;
+            emu->cpu.si += (emu->cpu.flags & 0x0004) ? -2 : 2;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 12;
+            break;
+            
+        case 0xAA: /* STOSB - Store byte string */
+            /* Store AL to [ES:DI] */
+            emu->memory.ram[emu->cpu.es + emu->cpu.di] = emu->cpu.ax & 0xFF;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -1 : 1;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xAB: /* STOSW - Store word string */
+            /* Store AX to [ES:DI] */
+            *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di) = emu->cpu.ax;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -2 : 2;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xAE: /* SCASB - Scan byte string */
+            /* Scan AL for byte at [ES:DI] */
+            uint8_t scasb_val = emu->memory.ram[emu->cpu.es + emu->cpu.di];
+            uint16_t scasb_result = (emu->cpu.ax & 0xFF) - scasb_val;
+            emu->cpu.flags = (scasb_result == 0) ? 0x0040 : 0;
+            emu->cpu.flags |= (scasb_result & 0x100) ? 0x0001 : 0;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -1 : 1;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 15;
+            break;
+            
+        case 0xAF: /* SCASW - Scan word string */
+            /* Scan AX for word at [ES:DI] */
+            uint16_t scasw_val = *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di);
+            uint32_t scasw_result = emu->cpu.ax - scasw_val;
+            emu->cpu.flags = (scasw_result == 0) ? 0x0040 : 0;
+            emu->cpu.flags |= (scasw_result & 0x10000) ? 0x0001 : 0;
+            emu->cpu.di += (emu->cpu.flags & 0x0004) ? -2 : 2;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 15;
+            break;
+            
+        /* Flag Manipulation Instructions */
+        case 0xF9: /* STC - Set Carry Flag */
+            emu->cpu.flags |= 0x0001;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 2;
+            break;
+            
+        case 0xF8: /* CLC - Clear Carry Flag */
+            emu->cpu.flags &= ~0x0001;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 2;
+            break;
+            
+        case 0xF5: /* CMC - Complement Carry Flag */
+            emu->cpu.flags ^= 0x0001;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 2;
+            break;
+            
+        case 0xFD: /* STD - Set Direction Flag */
+            emu->cpu.flags |= 0x0004;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 2;
+            break;
+            
+        case 0xFC: /* CLD - Clear Direction Flag */
+            emu->cpu.flags &= ~0x0004;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 2;
+            break;
+            
+        case 0x9F: /* LAHF - Load AH from Flags */
+            emu->cpu.bx = (emu->cpu.bx & 0xFF00) | (emu->cpu.flags & 0xFF);
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0x9E: /* SAHF - Store AH to Flags */
+            emu->cpu.flags = (emu->cpu.flags & 0xFF00) | (emu->cpu.bx & 0xFF);
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 4;
+            break;
+            
+        /* Additional Control Flow Instructions */
+        case 0xE0: /* LOOPNE - Loop if CX != 0 and ZF=0 */
+            emu->cpu.cx--;
+            if (emu->cpu.cx != 0 && !(emu->cpu.flags & 0x0040)) {
+                int8_t loop_offset = emu->memory.bios_rom[cs_ip + 1];
+                emu->cpu.ip += 2 + (int8_t)loop_offset;
+            } else {
+                emu->cpu.ip += 2;
+            }
+            emu->cpu.cycles += (emu->cpu.cx == 0) ? 5 : 17;
+            break;
+            
+        case 0xE1: /* LOOPE - Loop if CX != 0 and ZF=1 */
+            emu->cpu.cx--;
+            if (emu->cpu.cx != 0 && (emu->cpu.flags & 0x0040)) {
+                int8_t loop_offset = emu->memory.bios_rom[cs_ip + 1];
+                emu->cpu.ip += 2 + (int8_t)loop_offset;
+            } else {
+                emu->cpu.ip += 2;
+            }
+            emu->cpu.cycles += (emu->cpu.cx == 0) ? 5 : 17;
+            break;
+            
+        case 0xE3: /* JCXZ - Jump if CX = 0 */
+            if (emu->cpu.cx == 0) {
+                int8_t jcxz_offset = emu->memory.bios_rom[cs_ip + 1];
+                emu->cpu.ip += 2 + (int8_t)jcxz_offset;
+            } else {
+                emu->cpu.ip += 2;
+            }
+            emu->cpu.cycles += 6;
             break;
             
         default:
