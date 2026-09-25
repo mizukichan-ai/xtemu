@@ -86,9 +86,16 @@ int xt_init(xt_emulator_t *emu) {
     memset(emu->memory.ram, 0, sizeof(emu->memory.ram));
     memset(emu->memory.video_ram, 0, sizeof(emu->memory.video_ram));
     
-    /* Load BIOS ROM (placeholder - will load actual BIOS later) */
-    // TODO: Load actual IBM PC BIOS ROM
-    memset(emu->memory.bios_rom, 0x90, sizeof(emu->memory.bios_rom)); // NOPs for now
+    /* Load BIOS ROM */
+    FILE *bios_file = fopen("bios.bin", "rb");
+    if (bios_file) {
+        fread(emu->memory.bios_rom, 1, sizeof(emu->memory.bios_rom), bios_file);
+        fclose(bios_file);
+        printf("BIOS ROM loaded from bios.bin\n");
+    } else {
+        printf("Warning: bios.bin not found, using NOP BIOS\n");
+        memset(emu->memory.bios_rom, 0x90, sizeof(emu->memory.bios_rom)); // NOPs for now
+    }
     
     /* Reset CPU state */
     xt_reset(emu);
@@ -153,28 +160,93 @@ void xt_step(xt_emulator_t *emu) {
     uint8_t opcode = emu->memory.bios_rom[cs_ip];
     
     switch (opcode) {
-        case OP_NOP:
+        case 0x90: /* NOP */
             /* No operation */
             emu->cpu.ip += 1;
             emu->cpu.cycles += 4;
             break;
             
-        case OP_JMP:
-            /* Jump (short) */
-            emu->cpu.ip += 2;
+        case 0xE9: /* JMP near */
+            /* Jump to relative address */
+            uint8_t offset = emu->memory.bios_rom[cs_ip + 1];
+            emu->cpu.ip += 2 + (int8_t)offset;
             emu->cpu.cycles += 15;
             break;
             
-        case OP_RET:
-            /* Return */
+        case 0xEB: /* JMP short */
+            /* Short jump */
+            uint8_t short_offset = emu->memory.bios_rom[cs_ip + 1];
+            emu->cpu.ip += 2 + (int8_t)short_offset;
+            emu->cpu.cycles += 12;
+            break;
+            
+        case 0xC3: /* RET */
+            /* Return from subroutine */
             emu->cpu.ip += 1;
             emu->cpu.cycles += 20;
             break;
             
-        case OP_INT:
+        case 0xE8: /* CALL near */
+            /* Call subroutine */
+            uint8_t call_offset = emu->memory.bios_rom[cs_ip + 1];
+            uint16_t call_target = cs_ip + 2 + (int8_t)call_offset;
+            emu->cpu.sp -= 2;
+            uint16_t *stack_ptr = (uint16_t*)(emu->memory.ram + emu->cpu.ss + emu->cpu.sp);
+            *stack_ptr = emu->cpu.ip + 2;
+            emu->cpu.ip = call_target;
+            emu->cpu.cycles += 19;
+            break;
+            
+        case 0xCD: /* INT n */
             /* Interrupt */
+            uint8_t int_num = emu->memory.bios_rom[cs_ip + 1];
             emu->cpu.ip += 2;
             emu->cpu.cycles += 52;
+            printf("INT 0x%02X called at CS:IP %04X:%04X\n", int_num, emu->cpu.cs, emu->cpu.ip);
+            break;
+            
+        case 0xFA: /* CLI */
+            /* Clear interrupt flag */
+            emu->cpu.ip += 1;
+            emu->cpu.flags &= ~0x0002;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0xFB: /* STI */
+            /* Set interrupt flag */
+            emu->cpu.ip += 1;
+            emu->cpu.flags |= 0x0002;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0xF0: /* LOCK prefix */
+            /* Lock prefix - ignore for now */
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 2;
+            break;
+            
+        case 0x00: /* ADD AL,imm8 */
+            /* Add immediate to AL */
+            uint8_t imm8 = emu->memory.bios_rom[cs_ip + 1];
+            emu->cpu.ax += imm8;
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0x04: /* ADD AL,imm8 */
+            /* Add immediate to AL */
+            uint8_t al_imm = emu->memory.bios_rom[cs_ip + 1];
+            emu->cpu.ax += al_imm;
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 4;
+            break;
+            
+        case 0xB8: /* MOV AX,imm16 */
+            /* Move immediate 16-bit to AX */
+            uint16_t imm16 = *(uint16_t*)(emu->memory.bios_rom + cs_ip + 1);
+            emu->cpu.ax = imm16;
+            emu->cpu.ip += 3;
+            emu->cpu.cycles += 4;
             break;
             
         default:
@@ -190,6 +262,7 @@ void xt_step(xt_emulator_t *emu) {
 /* Main emulation loop */
 void xt_run(xt_emulator_t *emu) {
     emu->running = true;
+    int instruction_count = 0;
     
     while (emu->running) {
         /* Handle SDL events */
@@ -210,6 +283,13 @@ void xt_run(xt_emulator_t *emu) {
         
         /* Execute CPU instruction */
         xt_step(emu);
+        
+        /* Debug output */
+        if (instruction_count % 1000 == 0) {
+            printf("CS:IP = %04X:%04X, AX = %04X, BX = %04X, CX = %04X, DX = %04X, SP = %04X\n",
+                   emu->cpu.cs, emu->cpu.ip, emu->cpu.ax, emu->cpu.bx, emu->cpu.cx, emu->cpu.dx, emu->cpu.sp);
+        }
+        instruction_count++;
         
         /* Update display */
         if (emu->display.initialized) {
