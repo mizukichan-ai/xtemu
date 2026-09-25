@@ -12,6 +12,11 @@
 /* Memory definitions */
 #define XT_RAM_SIZE 640 * 1024  /* 640KB */
 
+/* Memory access flags */
+#define XT_MEM_READABLE    0x01
+#define XT_MEM_WRITABLE    0x02
+#define XT_MEM_EXECUTABLE  0x04
+
 /* Hardware registers */
 #define XT_PIC_MASTER 0x20
 #define XT_PIC_SLAVE  0xA0
@@ -79,5 +84,23 @@ void xt_cleanup(xt_emulator_t *emu);
 void xt_reset(xt_emulator_t *emu);
 void xt_step(xt_emulator_t *emu);
 void xt_run(xt_emulator_t *emu);
+
+/* Memory management functions */
+void xt_memory_init(xt_memory_t *memory);
+int xt_memory_load_bios(xt_memory_t *memory, const char *filename);
+uint32_t xt_memory_segment_to_linear(uint16_t segment, uint16_t offset);
+void xt_memory_linear_to_segment(uint32_t linear, uint16_t *segment, uint16_t *offset);
+bool xt_memory_is_valid_address(uint32_t address);
+uint8_t xt_memory_get_access_flags(uint32_t address);
+uint8_t xt_memory_read_byte(xt_memory_t *memory, uint32_t address);
+void xt_memory_write_byte(xt_memory_t *memory, uint32_t address, uint8_t value);
+uint16_t xt_memory_read_word(xt_memory_t *memory, uint32_t address);
+void xt_memory_write_word(xt_memory_t *memory, uint32_t address, uint16_t value);
+uint32_t xt_memory_read_dword(xt_memory_t *memory, uint32_t address);
+void xt_memory_write_dword(xt_memory_t *memory, uint32_t address, uint32_t value);
+void xt_memory_dump_range(xt_memory_t *memory, uint32_t start, uint32_t end, uint16_t bytes_per_line);
+void xt_memory_get_stats(xt_memory_t *memory, uint32_t *total_ram, uint32_t *total_video, uint32_t *total_bios);
+bool xt_memory_validate_stack_segment(xt_cpu_t *cpu, uint16_t stack_segment, uint16_t stack_pointer);
+bool xt_memory_check_stack_bounds(xt_cpu_t *cpu, uint16_t stack_size);
 
 #endif /* XTEMU_H */

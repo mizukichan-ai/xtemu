@@ -125,18 +125,11 @@ int xt_init(xt_emulator_t *emu) {
     memset(&emu->keyboard, 0, sizeof(emu->keyboard));
     
     /* Initialize memory */
-    memset(emu->memory.ram, 0, sizeof(emu->memory.ram));
-    memset(emu->memory.video_ram, 0, sizeof(emu->memory.video_ram));
+    xt_memory_init(&emu->memory);
     
     /* Load BIOS ROM */
-    FILE *bios_file = fopen("bios.bin", "rb");
-    if (bios_file) {
-        fread(emu->memory.bios_rom, 1, sizeof(emu->memory.bios_rom), bios_file);
-        fclose(bios_file);
-        printf("BIOS ROM loaded from bios.bin\n");
-    } else {
-        printf("Warning: bios.bin not found, using NOP BIOS\n");
-        memset(emu->memory.bios_rom, 0x90, sizeof(emu->memory.bios_rom)); // NOPs for now
+    if (xt_memory_load_bios(&emu->memory, "bios.bin") < 0) {
+        printf("Warning: Using NOP BIOS ROM\n");
     }
     
     /* Reset CPU state */
@@ -177,30 +170,38 @@ void xt_reset(xt_emulator_t *emu) {
     emu->cpu.si = 0;
     emu->cpu.di = 0;
     emu->cpu.bp = 0;
-    emu->cpu.sp = 0xFFFE;
-    emu->cpu.cs = 0xF000;
-    emu->cpu.ds = 0;
-    emu->cpu.es = 0;
-    emu->cpu.ss = 0;
+    emu->cpu.sp = 0xFFFE; /* Stack pointer at top of segment */
+    emu->cpu.cs = 0xF000; /* Code segment at BIOS ROM */
+    emu->cpu.ds = 0x0000; /* Data segment at conventional RAM */
+    emu->cpu.es = 0x0000; /* Extra segment at conventional RAM */
+    emu->cpu.ss = 0x0000; /* Stack segment at conventional RAM */
     emu->cpu.ip = 0xFFF0; /* Start at BIOS entry point */
     emu->cpu.flags = 0x0002; /* IF=0 (interrupts disabled) */
     emu->cpu.cycles = 0;
     emu->cpu.turbo_mode = false;
     
     /* Reset memory */
-    memset(emu->memory.ram, 0, sizeof(emu->memory.ram));
+    xt_memory_init(&emu->memory);
     
     /* Reset display */
     if (emu->display.framebuffer) {
         memset(emu->display.framebuffer, 0, XT_VGA_WIDTH * XT_VGA_HEIGHT * 4);
     }
+    
+    printf("Emulator reset:\n");
+    printf("- CS:IP = %04X:%04X\n", emu->cpu.cs, emu->cpu.ip);
+    printf("- DS:ES:SS = %04X:%04X:%04X\n", emu->cpu.ds, emu->cpu.es, emu->cpu.ss);
+    printf("- Stack: SS=0x%04X, SP=0x%04X\n", emu->cpu.ss, emu->cpu.sp);
 }
 
 /* Execute one CPU instruction */
 void xt_step(xt_emulator_t *emu) {
-    uint16_t cs_ip = (emu->cpu.cs << 4) + emu->cpu.ip;
-    uint8_t opcode = emu->memory.bios_rom[cs_ip];
+    uint32_t cs_ip = xt_memory_segment_to_linear(emu->cpu.cs, emu->cpu.ip);
+    uint8_t opcode = xt_memory_read_byte(&emu->memory, cs_ip);
     
+    printf("Executing opcode: 0x%02X at CS:IP %04X:%04X (linear: 0x%05X)\n", 
+           opcode, emu->cpu.cs, emu->cpu.ip, cs_ip);
+           
     switch (opcode) {
         case 0x90: /* NOP */
             /* No operation */
@@ -210,28 +211,40 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xE9: /* JMP near */
             /* Jump to relative address */
-            uint8_t offset = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t offset = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             emu->cpu.ip += 2 + (int8_t)offset;
             emu->cpu.cycles += 15;
             break;
             
         case 0xEB: /* JMP short */
             /* Short jump */
-            uint8_t short_offset = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t short_offset = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             emu->cpu.ip += 2 + (int8_t)short_offset;
             emu->cpu.cycles += 12;
             break;
             
         case 0xC3: /* RET */
             /* Return from subroutine */
+            if (!xt_memory_validate_stack_segment(&emu->cpu, emu->cpu.ss, emu->cpu.sp)) {
+                printf("Invalid stack segment for RET\n");
+                break;
+            }
             emu->cpu.ip += 1;
             emu->cpu.cycles += 20;
             break;
             
         case 0xE8: /* CALL near */
             /* Call subroutine */
-            uint8_t call_offset = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t call_offset = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             uint16_t call_target = cs_ip + 2 + (int8_t)call_offset;
+            
+            /* Push return address onto stack */
+            if (!xt_memory_validate_stack_segment(&emu->cpu, emu->cpu.ss, emu->cpu.sp) ||
+                !xt_memory_check_stack_bounds(&emu->cpu, 2)) {
+                printf("Stack error during CALL\n");
+                break;
+            }
+            
             emu->cpu.sp -= 2;
             uint16_t *stack_ptr = (uint16_t*)(emu->memory.ram + emu->cpu.ss + emu->cpu.sp);
             *stack_ptr = emu->cpu.ip + 2;
@@ -241,7 +254,7 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xCD: /* INT n */
             /* Interrupt */
-            uint8_t int_num = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t int_num = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             emu->cpu.ip += 2;
             emu->cpu.cycles += 52;
             printf("INT 0x%02X called at CS:IP %04X:%04X\n", int_num, emu->cpu.cs, emu->cpu.ip);
@@ -269,7 +282,7 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0x00: /* ADD AL,imm8 */
             /* Add immediate to AL */
-            uint8_t imm8 = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t imm8 = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             emu->cpu.ax += imm8;
             emu->cpu.ip += 2;
             emu->cpu.cycles += 4;
@@ -277,7 +290,7 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0x04: /* ADD AL,imm8 */
             /* Add immediate to AL */
-            uint8_t al_imm = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t al_imm = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             emu->cpu.ax += al_imm;
             emu->cpu.ip += 2;
             emu->cpu.cycles += 4;
@@ -285,7 +298,7 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xB8: /* MOV AX,imm16 */
             /* Move immediate 16-bit to AX */
-            uint16_t imm16 = *(uint16_t*)(emu->memory.bios_rom + cs_ip + 1);
+            uint16_t imm16 = xt_memory_read_word(&emu->memory, cs_ip + 1);
             emu->cpu.ax = imm16;
             emu->cpu.ip += 3;
             emu->cpu.cycles += 4;
@@ -294,7 +307,7 @@ void xt_step(xt_emulator_t *emu) {
         /* Arithmetic Instructions */
         case 0x14: /* ADD AL,imm8 */
             /* Add immediate to AL */
-            uint8_t adc_imm = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t adc_imm = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             uint8_t al_old = emu->cpu.ax & 0xFF;
             uint8_t adc_cf = (emu->cpu.flags & 0x0001) ? 1 : 0;
             uint16_t result = al_old + adc_imm + adc_cf;
@@ -307,7 +320,7 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0x1C: /* SBB AL,imm8 */
             /* Subtract with borrow immediate from AL */
-            uint8_t sbb_imm = emu->memory.bios_rom[cs_ip + 1];
+            uint8_t sbb_imm = xt_memory_read_byte(&emu->memory, cs_ip + 1);
             uint8_t al_val = emu->cpu.ax & 0xFF;
             uint8_t sbb_cf = (emu->cpu.flags & 0x0001) ? 1 : 0;
             uint16_t sbb_result = al_val - sbb_imm - sbb_cf;
@@ -403,7 +416,7 @@ void xt_step(xt_emulator_t *emu) {
                     }
                     break;
                 case 0: /* TEST AL,imm8 */
-                    uint8_t test_imm = emu->memory.bios_rom[cs_ip + 2];
+                    uint8_t test_imm = xt_memory_read_byte(&emu->memory, cs_ip + 2);
                     uint8_t test_result = (emu->cpu.ax & 0xFF) & test_imm;
                     emu->cpu.flags = (test_result == 0) ? 0x0040 : 0;
                     emu->cpu.ip += 3;
@@ -417,8 +430,12 @@ void xt_step(xt_emulator_t *emu) {
         /* String Instructions */
         case 0xA4: /* MOVSB - Move byte string */
             /* Move byte from [DS:SI] to [ES:DI] */
-            uint8_t movsb_val = emu->memory.ram[emu->cpu.ds + emu->cpu.si];
-            emu->memory.ram[emu->cpu.es + emu->cpu.di] = movsb_val;
+            uint32_t src_addr = xt_memory_segment_to_linear(emu->cpu.ds, emu->cpu.si);
+            uint32_t dst_addr = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            
+            uint8_t movsb_val = xt_memory_read_byte(&emu->memory, src_addr);
+            xt_memory_write_byte(&emu->memory, dst_addr, movsb_val);
+            
             emu->cpu.si += (emu->cpu.flags & 0x0004) ? -1 : 1;
             emu->cpu.di += (emu->cpu.flags & 0x0004) ? -1 : 1;
             emu->cpu.ip += 1;
@@ -427,8 +444,12 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xA5: /* MOVSW - Move word string */
             /* Move word from [DS:SI] to [ES:DI] */
-            uint16_t movsw_val = *(uint16_t*)(emu->memory.ram + emu->cpu.ds + emu->cpu.si);
-            *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di) = movsw_val;
+            uint32_t movsw_src = xt_memory_segment_to_linear(emu->cpu.ds, emu->cpu.si);
+            uint32_t movsw_dst = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            
+            uint16_t movsw_val = xt_memory_read_word(&emu->memory, movsw_src);
+            xt_memory_write_word(&emu->memory, movsw_dst, movsw_val);
+            
             emu->cpu.si += (emu->cpu.flags & 0x0004) ? -2 : 2;
             emu->cpu.di += (emu->cpu.flags & 0x0004) ? -2 : 2;
             emu->cpu.ip += 1;
@@ -437,8 +458,11 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xA6: /* CMPSB - Compare byte string */
             /* Compare [DS:SI] with [ES:DI] */
-            uint8_t cmpsb_val1 = emu->memory.ram[emu->cpu.ds + emu->cpu.si];
-            uint8_t cmpsb_val2 = emu->memory.ram[emu->cpu.es + emu->cpu.di];
+            uint32_t cmpsb_src = xt_memory_segment_to_linear(emu->cpu.ds, emu->cpu.si);
+            uint32_t cmpsb_dst = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            
+            uint8_t cmpsb_val1 = xt_memory_read_byte(&emu->memory, cmpsb_src);
+            uint8_t cmpsb_val2 = xt_memory_read_byte(&emu->memory, cmpsb_dst);
             uint16_t cmpsb_result = cmpsb_val1 - cmpsb_val2;
             emu->cpu.flags = (cmpsb_result == 0) ? 0x0040 : 0;
             emu->cpu.flags |= (cmpsb_result & 0x100) ? 0x0001 : 0;
@@ -450,8 +474,11 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xA7: /* CMPSW - Compare word string */
             /* Compare [DS:SI] with [ES:DI] */
-            uint16_t cmpsw_val1 = *(uint16_t*)(emu->memory.ram + emu->cpu.ds + emu->cpu.si);
-            uint16_t cmpsw_val2 = *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di);
+            uint32_t cmpsw_src = xt_memory_segment_to_linear(emu->cpu.ds, emu->cpu.si);
+            uint32_t cmpsw_dst = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            
+            uint16_t cmpsw_val1 = xt_memory_read_word(&emu->memory, cmpsw_src);
+            uint16_t cmpsw_val2 = xt_memory_read_word(&emu->memory, cmpsw_dst);
             uint32_t cmpsw_result = cmpsw_val1 - cmpsw_val2;
             emu->cpu.flags = (cmpsw_result == 0) ? 0x0040 : 0;
             emu->cpu.flags |= (cmpsw_result & 0x10000) ? 0x0001 : 0;
@@ -463,7 +490,8 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xAC: /* LODSB - Load byte string */
             /* Load byte from [DS:SI] to AL */
-            uint8_t lodsb_val = emu->memory.ram[emu->cpu.ds + emu->cpu.si];
+            uint32_t lodsb_src = xt_memory_segment_to_linear(emu->cpu.ds, emu->cpu.si);
+            uint8_t lodsb_val = xt_memory_read_byte(&emu->memory, lodsb_src);
             emu->cpu.ax = (emu->cpu.ax & 0xFF00) | lodsb_val;
             emu->cpu.si += (emu->cpu.flags & 0x0004) ? -1 : 1;
             emu->cpu.ip += 1;
@@ -472,7 +500,8 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xAD: /* LODSW - Load word string */
             /* Load word from [DS:SI] to AX */
-            uint16_t lodsw_val = *(uint16_t*)(emu->memory.ram + emu->cpu.ds + emu->cpu.si);
+            uint32_t lodsw_src = xt_memory_segment_to_linear(emu->cpu.ds, emu->cpu.si);
+            uint16_t lodsw_val = xt_memory_read_word(&emu->memory, lodsw_src);
             emu->cpu.ax = lodsw_val;
             emu->cpu.si += (emu->cpu.flags & 0x0004) ? -2 : 2;
             emu->cpu.ip += 1;
@@ -481,7 +510,8 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xAA: /* STOSB - Store byte string */
             /* Store AL to [ES:DI] */
-            emu->memory.ram[emu->cpu.es + emu->cpu.di] = emu->cpu.ax & 0xFF;
+            uint32_t stosb_dst = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            xt_memory_write_byte(&emu->memory, stosb_dst, emu->cpu.ax & 0xFF);
             emu->cpu.di += (emu->cpu.flags & 0x0004) ? -1 : 1;
             emu->cpu.ip += 1;
             emu->cpu.cycles += 10;
@@ -489,7 +519,8 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xAB: /* STOSW - Store word string */
             /* Store AX to [ES:DI] */
-            *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di) = emu->cpu.ax;
+            uint32_t stosw_dst = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            xt_memory_write_word(&emu->memory, stosw_dst, emu->cpu.ax);
             emu->cpu.di += (emu->cpu.flags & 0x0004) ? -2 : 2;
             emu->cpu.ip += 1;
             emu->cpu.cycles += 10;
@@ -497,7 +528,8 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xAE: /* SCASB - Scan byte string */
             /* Scan AL for byte at [ES:DI] */
-            uint8_t scasb_val = emu->memory.ram[emu->cpu.es + emu->cpu.di];
+            uint32_t scasb_src = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            uint8_t scasb_val = xt_memory_read_byte(&emu->memory, scasb_src);
             uint16_t scasb_result = (emu->cpu.ax & 0xFF) - scasb_val;
             emu->cpu.flags = (scasb_result == 0) ? 0x0040 : 0;
             emu->cpu.flags |= (scasb_result & 0x100) ? 0x0001 : 0;
@@ -508,7 +540,8 @@ void xt_step(xt_emulator_t *emu) {
             
         case 0xAF: /* SCASW - Scan word string */
             /* Scan AX for word at [ES:DI] */
-            uint16_t scasw_val = *(uint16_t*)(emu->memory.ram + emu->cpu.es + emu->cpu.di);
+            uint32_t scasw_src = xt_memory_segment_to_linear(emu->cpu.es, emu->cpu.di);
+            uint16_t scasw_val = xt_memory_read_word(&emu->memory, scasw_src);
             uint32_t scasw_result = emu->cpu.ax - scasw_val;
             emu->cpu.flags = (scasw_result == 0) ? 0x0040 : 0;
             emu->cpu.flags |= (scasw_result & 0x10000) ? 0x0001 : 0;
