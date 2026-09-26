@@ -93,6 +93,36 @@ struct xt_keyboard {
     uint8_t     scan_code_set;
 };
 
+/* DMA structure */
+struct xt_dma_channel {
+    uint8_t mode;           /* Mode register */
+    uint8_t address;        /* Address register (low byte) */
+    uint8_t address_high;   /* Address register (high byte) */
+    uint8_t count;          /* Count register (low byte) */
+    uint8_t count_high;     /* Count register (high byte) */
+    uint8_t page;           /* Page register */
+    bool    enabled;        /* Channel enabled */
+    bool    auto_init;      /* Auto-initialize mode */
+    uint8_t direction;      /* Direction: 0=device->mem, 1=mem->device */
+    uint8_t transfer_type;  /* Transfer type */
+};
+
+struct xt_dma {
+    /* DMA channels (4 channels: 0-3) */
+    struct xt_dma_channel channels[4];
+    
+    /* Control registers */
+    uint8_t command;           /* Command register */
+    uint8_t status;            /* Status register */
+    uint8_t request;           /* Request register */
+    uint8_t single_mask;       /* Single channel mask */
+    uint8_t all_mask;          /* All channels mask */
+    
+    /* State */
+    bool initialized;
+    uint8_t cascade_channel;   /* Cascade channel (channel 4) */
+};
+
 /* PIC (Programmable Interrupt Controller) structure */
 struct xt_pic {
     /* Master PIC */
@@ -154,6 +184,7 @@ typedef struct {
     xt_keyboard_t keyboard;
     struct xt_pic pic;
     struct xt_pit pit;
+    struct xt_dma dma;
     bool     running;
     bool     debug_mode;
 } xt_emulator_t;
@@ -182,6 +213,15 @@ void xt_pit_write(struct xt_pit *pit, uint16_t port, uint8_t value);
 uint8_t xt_pit_read(struct xt_pit *pit, uint16_t port);
 void xt_pit_update(struct xt_pit *pit, uint32_t cycles);
 void xt_pit_trigger_irq0(struct xt_pit *pit, struct xt_pic *pic);
+
+/* DMA Controller functions */
+void xt_dma_init(struct xt_dma *dma);
+void xt_dma_write(struct xt_dma *dma, uint16_t port, uint8_t value);
+uint8_t xt_dma_read(struct xt_dma *dma, uint16_t port);
+void xt_dma_trigger_transfer(struct xt_dma *dma, uint8_t channel);
+uint8_t xt_dma_get_status(struct xt_dma *dma);
+void xt_dma_set_mask(struct xt_dma *dma, uint8_t channel, bool masked);
+void xt_dma_clear_mask(struct xt_dma *dma, uint8_t channel);
 
 /* Keyboard Controller functions */
 void xt_keyboard_init(struct xt_keyboard *keyboard);

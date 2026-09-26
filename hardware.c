@@ -739,3 +739,303 @@ void xt_pit_trigger_irq0(struct xt_pit *pit, struct xt_pic *pic) {
         printf("PIT triggered IRQ 0\n");
     }
 }
+
+/* DMA Controller (8237) implementation */
+
+/* DMA register addresses */
+#define XT_DMA_CHANNEL_BASE    0x00  /* Channel 0-3 address registers */
+#define XT_DMA_CHANNEL_COUNT   0x08  /* Channel 0-3 count registers */
+#define XT_DMA_STATUS_REG      0x0D  /* Status register (read from 0x0D) */
+#define XT_DMA_COMMAND_REG     0x0E  /* Command register (write to 0x0E) */
+#define XT_DMA_REQUEST_REG     0x0F  /* Request register (write to 0x0F) */
+#define XT_DMA_SINGLE_MASK     0x0F  /* Single channel mask (write to 0x0F) */
+#define XT_DMA_ALL_MASK        0x0D  /* All channels mask (write to 0x0D) */
+
+/* DMA modes */
+#define XT_DMA_MODE_SINGLE      0x00
+#define XT_DMA_MODE_BLOCK       0x01
+#define XT_DMA_MODE_CASCADE     0x02
+#define XT_DMA_MODE_AUTO_INIT  0x03
+
+/* DMA transfer types */
+#define XT_DMA_VERIFY          0x00
+#define XT_DMA_WRITE           0x04
+#define XT_DMA_READ            0x08
+
+/* Initialize DMA controller */
+void xt_dma_init(struct xt_dma *dma) {
+    /* Clear all DMA registers */
+    memset(dma, 0, sizeof(struct xt_dma));
+    
+    /* Initialize channels */
+    for (int i = 0; i < 4; i++) {
+        dma->channels[i].enabled = false;
+        dma->channels[i].auto_init = false;
+        dma->channels[i].direction = 0;
+        dma->channels[i].transfer_type = XT_DMA_VERIFY;
+        dma->channels[i].address = 0xFF;
+        dma->channels[i].address_high = 0xFF;
+        dma->channels[i].count = 0xFF;
+        dma->channels[i].count_high = 0xFF;
+        dma->channels[i].page = 0xFF;
+    }
+    
+    /* Initialize control registers */
+    dma->command = 0x00;
+    dma->status = 0x00;
+    dma->request = 0x00;
+    dma->single_mask = 0x00;
+    dma->all_mask = 0x00;
+    dma->cascade_channel = 0xFF;
+    
+    /* Set initial state */
+    dma->initialized = true;
+    
+    printf("DMA controller initialized\n");
+}
+
+/* Write to DMA register */
+void xt_dma_write(struct xt_dma *dma, uint16_t port, uint8_t value) {
+    uint8_t offset = port - XT_DMA_BASE;
+    
+    if (offset >= 16) {
+        return; /* Invalid DMA register */
+    }
+    
+    printf("DMA write to port 0x%02X: 0x%02X\n", port, value);
+    
+    /* Channel address registers (0x00-0x07) */
+    if (offset < 8) {
+        uint8_t channel = offset / 2;
+        uint8_t is_high = (offset % 2) == 1;
+        
+        if (channel < 4) {
+            if (is_high) {
+                dma->channels[channel].address_high = value;
+            } else {
+                dma->channels[channel].address = value;
+            }
+        }
+    }
+    /* Channel count registers (0x08-0x0B) */
+    else if (offset < 12) {
+        uint8_t channel = (offset - 8) / 2;
+        uint8_t is_high = ((offset - 8) % 2) == 1;
+        
+        if (channel < 4) {
+            if (is_high) {
+                dma->channels[channel].count_high = value;
+            } else {
+                dma->channels[channel].count = value;
+            }
+        }
+    }
+    /* Page registers (0x80-0x8F) - not directly addressable in 0x00-0x0F range */
+    /* These would be handled by separate memory-mapped page registers */
+    else if (offset >= 0x80) {
+        uint8_t channel = offset - 0x80;
+        if (channel < 4) {
+            dma->channels[channel].page = value;
+        }
+    }
+    else {
+        /* Control registers - same port used for read/write but different meanings */
+        switch (port) {
+            case 0x0D:
+                /* Port 0x0D: Read = Status, Write = All Mask */
+                if (value == 0xFF) {
+                    /* Read operation - return status */
+                    value = xt_dma_get_status(dma);
+                    printf("DMA status read: 0x%02X\n", value);
+                } else {
+                    /* Write operation - all channel mask */
+                    dma->all_mask = value;
+                    bool all_masked = (value & 0x01) != 0;
+                    for (int i = 0; i < 4; i++) {
+                        xt_dma_set_mask(dma, i, all_masked);
+                    }
+                    printf("DMA all mask: %s\n", all_masked ? "masked" : "unmasked");
+                }
+                break;
+                
+            case 0x0E:
+                /* Port 0x0E: Write = Command register */
+                dma->command = value;
+                printf("DMA command register: 0x%02X\n", value);
+                break;
+                
+            case 0x0F:
+                /* Port 0x0F: Write = Request register or Single Mask */
+                if (value <= 0x0F) {
+                    /* Single channel mask */
+                    dma->single_mask = value;
+                    uint8_t channel = value & 0x03;
+                    bool masked = (value & 0x04) != 0;
+                    xt_dma_set_mask(dma, channel, masked);
+                    printf("DMA single mask: channel %d %s\n", channel, masked ? "masked" : "unmasked");
+                } else {
+                    /* Request register */
+                    dma->request = value;
+                    printf("DMA request register: 0x%02X\n", value);
+                    
+                    /* Check for DMA requests */
+                    for (int i = 0; i < 4; i++) {
+                        if (value & (1 << i)) {
+                            printf("DMA request for channel %d\n", i);
+                            xt_dma_trigger_transfer(dma, i);
+                        }
+                    }
+                }
+                break;
+        }
+    }
+}
+
+/* Read from DMA register */
+uint8_t xt_dma_read(struct xt_dma *dma, uint16_t port) {
+    uint8_t offset = port - XT_DMA_BASE;
+    uint8_t value = 0xFF;
+    
+    if (offset >= 16) {
+        return 0xFF; /* Invalid DMA register */
+    }
+    
+    printf("DMA read from port 0x%02X\n", port);
+    
+    /* Channel address registers (0x00-0x07) */
+    if (offset < 8) {
+        uint8_t channel = offset / 2;
+        uint8_t is_high = (offset % 2) == 1;
+        
+        if (channel < 4) {
+            if (is_high) {
+                value = dma->channels[channel].address_high;
+            } else {
+                value = dma->channels[channel].address;
+            }
+        }
+    }
+    /* Channel count registers (0x08-0x0B) */
+    else if (offset < 12) {
+        uint8_t channel = (offset - 8) / 2;
+        uint8_t is_high = ((offset - 8) % 2) == 1;
+        
+        if (channel < 4) {
+            if (is_high) {
+                value = dma->channels[channel].count_high;
+            } else {
+                value = dma->channels[channel].count;
+            }
+        }
+    }
+    /* Status register or All Mask */
+    else if (port == 0x0D) {
+        /* Port 0x0D: Read = Status, Write = All Mask (handled in write function) */
+        value = xt_dma_get_status(dma);
+        printf("DMA read from port 0x0D (status): 0x%02X\n", value);
+    }
+    /* Command register */
+    else if (port == 0x0E) {
+        /* Port 0x0E: Write = Command (handled in write function) */
+        value = dma->command;
+        printf("DMA read from port 0x0E (command): 0x%02X\n", value);
+    }
+    /* Request register or Single Mask */
+    else if (port == 0x0F) {
+        /* Port 0x0F: Write = Request or Single Mask (handled in write function) */
+        value = dma->request;
+        printf("DMA read from port 0x0F (request): 0x%02X\n", value);
+    }
+    
+    printf("DMA read value: 0x%02X\n", value);
+    return value;
+}
+
+/* Trigger DMA transfer */
+void xt_dma_trigger_transfer(struct xt_dma *dma, uint8_t channel) {
+    if (channel >= 4) {
+        return; /* Invalid channel */
+    }
+    
+    struct xt_dma_channel *chan = &dma->channels[channel];
+    
+    /* Check if channel is enabled and not masked */
+    if (!chan->enabled || (dma->single_mask & (1 << channel))) {
+        printf("DMA channel %d disabled or masked\n", channel);
+        return;
+    }
+    
+    /* Calculate DMA address */
+    uint32_t dma_address = (chan->page << 16) | (chan->address_high << 8) | chan->address;
+    
+    /* Calculate DMA count */
+    uint16_t dma_count = (chan->count_high << 8) | chan->count;
+    
+    printf("DMA transfer: channel %d, address=0x%06X, count=%d, direction=%s, type=%s\n",
+           channel, dma_address, dma_count,
+           chan->direction ? "mem->device" : "device->mem",
+           chan->transfer_type == XT_DMA_WRITE ? "write" : 
+           chan->transfer_type == XT_DMA_READ ? "read" : "verify");
+    
+    /* Perform actual transfer (simplified) */
+    if (chan->direction == 0) {
+        /* Device to memory transfer */
+        printf("Performing device->memory DMA transfer\n");
+    } else {
+        /* Memory to device transfer */
+        printf("Performing memory->device DMA transfer\n");
+    }
+    
+    /* Update status */
+    dma->status |= (1 << channel); /* Channel active */
+    
+    /* If auto-initialize mode, reload registers */
+    if (chan->auto_init) {
+        printf("DMA auto-initialize mode enabled for channel %d\n", channel);
+        /* In real implementation, this would reload the original values */
+    }
+    
+    /* Clear request bit */
+    dma->request &= ~(1 << channel);
+}
+
+/* Get DMA status */
+uint8_t xt_dma_get_status(struct xt_dma *dma) {
+    uint8_t status = 0;
+    
+    /* Channel status bits */
+    for (int i = 0; i < 4; i++) {
+        if (dma->status & (1 << i)) {
+            status |= (1 << i);
+        }
+    }
+    
+    /* Address latch enable bits */
+    for (int i = 0; i < 4; i++) {
+        if (dma->channels[i].enabled) {
+            status |= (1 << (i + 4));
+        }
+    }
+    
+    return status;
+}
+
+/* Set channel mask */
+void xt_dma_set_mask(struct xt_dma *dma, uint8_t channel, bool masked) {
+    if (channel >= 4) {
+        return;
+    }
+    
+    if (masked) {
+        dma->channels[channel].enabled = false;
+        printf("DMA channel %d masked\n", channel);
+    } else {
+        dma->channels[channel].enabled = true;
+        printf("DMA channel %d unmasked\n", channel);
+    }
+}
+
+/* Clear channel mask */
+void xt_dma_clear_mask(struct xt_dma *dma, uint8_t channel) {
+    xt_dma_set_mask(dma, channel, false);
+}

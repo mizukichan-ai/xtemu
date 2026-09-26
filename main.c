@@ -130,6 +130,9 @@ int xt_init(xt_emulator_t *emu) {
     /* Initialize PIT */
     xt_pit_init(&emu->pit);
     
+    /* Initialize DMA */
+    xt_dma_init(&emu->dma);
+    
     /* Initialize memory */
     xt_memory_init(&emu->memory);
     
@@ -301,6 +304,9 @@ void xt_step(xt_emulator_t *emu) {
             } else if (in_port == XT_KEYBOARD) {
                 /* Read keyboard controller data port */
                 in_value = xt_keyboard_read(&emu->keyboard, in_port);
+            } else if (in_port < 16) {
+                /* Read DMA register */
+                in_value = xt_dma_read(&emu->dma, in_port);
             } else {
                 printf("IN from port 0x%02X (AL = 0x%02X)\n", in_port, in_value);
             }
@@ -331,6 +337,11 @@ void xt_step(xt_emulator_t *emu) {
                 uint8_t low = xt_keyboard_read(&emu->keyboard, in_port_ax);
                 uint8_t high = xt_keyboard_read(&emu->keyboard, in_port_ax + 1);
                 in_value_ax = (high << 8) | low;
+            } else if (in_port_ax < 16) {
+                /* Read DMA register (16-bit read) */
+                uint8_t low = xt_dma_read(&emu->dma, in_port_ax);
+                uint8_t high = xt_dma_read(&emu->dma, in_port_ax + 1);
+                in_value_ax = (high << 8) | low;
             } else {
                 printf("IN from port 0x%02X (AX = 0x%04X)\n", in_port_ax, in_value_ax);
             }
@@ -355,6 +366,9 @@ void xt_step(xt_emulator_t *emu) {
             } else if (out_port == XT_KEYBOARD) {
                 /* Write to keyboard controller data port */
                 xt_keyboard_write(&emu->keyboard, out_port, out_value);
+            } else if (out_port < 16) {
+                /* Write to DMA register */
+                xt_dma_write(&emu->dma, out_port, out_value);
             } else {
                 printf("OUT to port 0x%02X (value 0x%02X)\n", out_port, out_value);
             }
@@ -381,6 +395,10 @@ void xt_step(xt_emulator_t *emu) {
                 /* Write to keyboard controller data port (16-bit write) */
                 xt_keyboard_write(&emu->keyboard, out_port_ax, out_value_ax & 0xFF);
                 xt_keyboard_write(&emu->keyboard, out_port_ax + 1, (out_value_ax >> 8) & 0xFF);
+            } else if (out_port_ax < 16) {
+                /* Write to DMA register (16-bit write) */
+                xt_dma_write(&emu->dma, out_port_ax, out_value_ax & 0xFF);
+                xt_dma_write(&emu->dma, out_port_ax + 1, (out_value_ax >> 8) & 0xFF);
             } else {
                 printf("OUT to port 0x%02X (value 0x%04X)\n", out_port_ax, out_value_ax);
             }
@@ -404,6 +422,9 @@ void xt_step(xt_emulator_t *emu) {
             } else if (dx_port == XT_KEYBOARD) {
                 /* Read keyboard controller data port */
                 dx_in_value = xt_keyboard_read(&emu->keyboard, dx_port);
+            } else if (dx_port < 16) {
+                /* Read DMA register */
+                dx_in_value = xt_dma_read(&emu->dma, dx_port);
             } else {
                 printf("IN from port DX=0x%04X (AL = 0x%02X)\n", dx_port, dx_in_value);
             }
@@ -434,6 +455,11 @@ void xt_step(xt_emulator_t *emu) {
                 uint8_t low = xt_keyboard_read(&emu->keyboard, dx_port_ax);
                 uint8_t high = xt_keyboard_read(&emu->keyboard, dx_port_ax + 1);
                 dx_in_value_ax = (high << 8) | low;
+            } else if (dx_port_ax < 16) {
+                /* Read DMA register (16-bit read) */
+                uint8_t low = xt_dma_read(&emu->dma, dx_port_ax);
+                uint8_t high = xt_dma_read(&emu->dma, dx_port_ax + 1);
+                dx_in_value_ax = (high << 8) | low;
             } else {
                 printf("IN from port DX=0x%04X (AX = 0x%04X)\n", dx_port_ax, dx_in_value_ax);
             }
@@ -458,6 +484,9 @@ void xt_step(xt_emulator_t *emu) {
             } else if (dx_out_port == XT_KEYBOARD) {
                 /* Write to keyboard controller data port */
                 xt_keyboard_write(&emu->keyboard, dx_out_port, dx_out_value);
+            } else if (dx_out_port < 16) {
+                /* Write to DMA register */
+                xt_dma_write(&emu->dma, dx_out_port, dx_out_value);
             } else {
                 printf("OUT to port DX=0x%04X (value 0x%02X)\n", dx_out_port, dx_out_value);
             }
@@ -484,6 +513,10 @@ void xt_step(xt_emulator_t *emu) {
                 /* Write to keyboard controller data port (16-bit write) */
                 xt_keyboard_write(&emu->keyboard, dx_out_port_ax, dx_out_value_ax & 0xFF);
                 xt_keyboard_write(&emu->keyboard, dx_out_port_ax + 1, (dx_out_value_ax >> 8) & 0xFF);
+            } else if (dx_out_port_ax < 16) {
+                /* Write to DMA register (16-bit write) */
+                xt_dma_write(&emu->dma, dx_out_port_ax, dx_out_value_ax & 0xFF);
+                xt_dma_write(&emu->dma, dx_out_port_ax + 1, (dx_out_value_ax >> 8) & 0xFF);
             } else {
                 printf("OUT to port DX=0x%04X (value 0x%04X)\n", dx_out_port_ax, dx_out_value_ax);
             }
