@@ -123,6 +123,29 @@ struct xt_pic {
     uint8_t cascade_vector;
 };
 
+/* PIT (Programmable Interval Timer) structure */
+struct xt_pit {
+    /* Timer counters (3 channels) */
+    struct {
+        uint16_t counter;    /* Current counter value */
+        uint16_t latch;      /* Latched counter value */
+        uint8_t mode;        /* Mode of operation */
+        uint8_t command;     /* Command register */
+        bool bcd;           /* BCD vs binary mode */
+        bool read_back;     /* Read back mode */
+        uint8_t status;     /* Status flags */
+    } channels[3];
+    
+    /* Control register */
+    uint8_t control;
+    
+    /* State */
+    bool initialized;
+    uint32_t last_tick;   /* Last timer tick */
+    uint32_t tick_count;  /* Total tick count */
+    bool timer_running;   /* Timer running state */
+};
+
 /* Main emulator state */
 typedef struct {
     xt_cpu_t cpu;
@@ -130,6 +153,7 @@ typedef struct {
     xt_display_t display;
     xt_keyboard_t keyboard;
     struct xt_pic pic;
+    struct xt_pit pit;
     bool     running;
     bool     debug_mode;
 } xt_emulator_t;
@@ -151,6 +175,13 @@ uint8_t xt_pic_get_interrupt_vector(struct xt_pic *pic, uint8_t irq);
 void xt_pic_send_eoi(struct xt_pic *pic, uint8_t irq);
 void xt_pic_get_status(struct xt_pic *pic, uint8_t *initialized, uint8_t *slave_initialized, 
                        uint8_t *master_imr, uint8_t *slave_imr);
+
+/* PIT (Programmable Interval Timer) functions */
+void xt_pit_init(struct xt_pit *pit);
+void xt_pit_write(struct xt_pit *pit, uint16_t port, uint8_t value);
+uint8_t xt_pit_read(struct xt_pit *pit, uint16_t port);
+void xt_pit_update(struct xt_pit *pit, uint32_t cycles);
+void xt_pit_trigger_irq0(struct xt_pit *pit, struct xt_pic *pic);
 
 /* Keyboard Controller functions */
 void xt_keyboard_init(struct xt_keyboard *keyboard);

@@ -127,6 +127,9 @@ int xt_init(xt_emulator_t *emu) {
     /* Initialize PIC */
     xt_pic_init(&emu->pic);
     
+    /* Initialize PIT */
+    xt_pit_init(&emu->pit);
+    
     /* Initialize memory */
     xt_memory_init(&emu->memory);
     
@@ -292,6 +295,9 @@ void xt_step(xt_emulator_t *emu) {
             if (in_port == XT_PIC_MASTER || in_port == XT_PIC_MASTER + 1) {
                 /* Read PIC register */
                 in_value = xt_pic_read(&emu->pic, in_port);
+            } else if (in_port >= XT_PIT_BASE && in_port <= XT_PIT_BASE + 3) {
+                /* Read PIT register */
+                in_value = xt_pit_read(&emu->pit, in_port);
             } else if (in_port == XT_KEYBOARD) {
                 /* Read keyboard controller data port */
                 in_value = xt_keyboard_read(&emu->keyboard, in_port);
@@ -314,6 +320,11 @@ void xt_step(xt_emulator_t *emu) {
                 /* Read PIC register (16-bit read) */
                 uint8_t low = xt_pic_read(&emu->pic, in_port_ax);
                 uint8_t high = xt_pic_read(&emu->pic, in_port_ax + 1);
+                in_value_ax = (high << 8) | low;
+            } else if (in_port_ax >= XT_PIT_BASE && in_port_ax <= XT_PIT_BASE + 3) {
+                /* Read PIT register (16-bit read) */
+                uint8_t low = xt_pit_read(&emu->pit, in_port_ax);
+                uint8_t high = xt_pit_read(&emu->pit, in_port_ax + 1);
                 in_value_ax = (high << 8) | low;
             } else if (in_port_ax == XT_KEYBOARD) {
                 /* Read keyboard controller data port (16-bit read) */
@@ -338,6 +349,9 @@ void xt_step(xt_emulator_t *emu) {
             if (out_port == XT_PIC_MASTER || out_port == XT_PIC_MASTER + 1) {
                 /* Write to PIC register */
                 xt_pic_write(&emu->pic, out_port, out_value);
+            } else if (out_port >= XT_PIT_BASE && out_port <= XT_PIT_BASE + 3) {
+                /* Write to PIT register */
+                xt_pit_write(&emu->pit, out_port, out_value);
             } else if (out_port == XT_KEYBOARD) {
                 /* Write to keyboard controller data port */
                 xt_keyboard_write(&emu->keyboard, out_port, out_value);
@@ -359,6 +373,10 @@ void xt_step(xt_emulator_t *emu) {
                 /* Write to PIC register (16-bit write) */
                 xt_pic_write(&emu->pic, out_port_ax, out_value_ax & 0xFF);
                 xt_pic_write(&emu->pic, out_port_ax + 1, (out_value_ax >> 8) & 0xFF);
+            } else if (out_port_ax >= XT_PIT_BASE && out_port_ax <= XT_PIT_BASE + 3) {
+                /* Write to PIT register (16-bit write) */
+                xt_pit_write(&emu->pit, out_port_ax, out_value_ax & 0xFF);
+                xt_pit_write(&emu->pit, out_port_ax + 1, (out_value_ax >> 8) & 0xFF);
             } else if (out_port_ax == XT_KEYBOARD) {
                 /* Write to keyboard controller data port (16-bit write) */
                 xt_keyboard_write(&emu->keyboard, out_port_ax, out_value_ax & 0xFF);
@@ -380,6 +398,9 @@ void xt_step(xt_emulator_t *emu) {
             if (dx_port == XT_PIC_MASTER || dx_port == XT_PIC_MASTER + 1) {
                 /* Read PIC register */
                 dx_in_value = xt_pic_read(&emu->pic, dx_port);
+            } else if (dx_port >= XT_PIT_BASE && dx_port <= XT_PIT_BASE + 3) {
+                /* Read PIT register */
+                dx_in_value = xt_pit_read(&emu->pit, dx_port);
             } else if (dx_port == XT_KEYBOARD) {
                 /* Read keyboard controller data port */
                 dx_in_value = xt_keyboard_read(&emu->keyboard, dx_port);
@@ -402,6 +423,11 @@ void xt_step(xt_emulator_t *emu) {
                 /* Read PIC register (16-bit read) */
                 uint8_t low = xt_pic_read(&emu->pic, dx_port_ax);
                 uint8_t high = xt_pic_read(&emu->pic, dx_port_ax + 1);
+                dx_in_value_ax = (high << 8) | low;
+            } else if (dx_port_ax >= XT_PIT_BASE && dx_port_ax <= XT_PIT_BASE + 3) {
+                /* Read PIT register (16-bit read) */
+                uint8_t low = xt_pit_read(&emu->pit, dx_port_ax);
+                uint8_t high = xt_pit_read(&emu->pit, dx_port_ax + 1);
                 dx_in_value_ax = (high << 8) | low;
             } else if (dx_port_ax == XT_KEYBOARD) {
                 /* Read keyboard controller data port (16-bit read) */
@@ -426,6 +452,9 @@ void xt_step(xt_emulator_t *emu) {
             if (dx_out_port == XT_PIC_MASTER || dx_out_port == XT_PIC_MASTER + 1) {
                 /* Write to PIC register */
                 xt_pic_write(&emu->pic, dx_out_port, dx_out_value);
+            } else if (dx_out_port >= XT_PIT_BASE && dx_out_port <= XT_PIT_BASE + 3) {
+                /* Write to PIT register */
+                xt_pit_write(&emu->pit, dx_out_port, dx_out_value);
             } else if (dx_out_port == XT_KEYBOARD) {
                 /* Write to keyboard controller data port */
                 xt_keyboard_write(&emu->keyboard, dx_out_port, dx_out_value);
@@ -447,6 +476,10 @@ void xt_step(xt_emulator_t *emu) {
                 /* Write to PIC register (16-bit write) */
                 xt_pic_write(&emu->pic, dx_out_port_ax, dx_out_value_ax & 0xFF);
                 xt_pic_write(&emu->pic, dx_out_port_ax + 1, (dx_out_value_ax >> 8) & 0xFF);
+            } else if (dx_out_port_ax >= XT_PIT_BASE && dx_out_port_ax <= XT_PIT_BASE + 3) {
+                /* Write to PIT register (16-bit write) */
+                xt_pit_write(&emu->pit, dx_out_port_ax, dx_out_value_ax & 0xFF);
+                xt_pit_write(&emu->pit, dx_out_port_ax + 1, (dx_out_value_ax >> 8) & 0xFF);
             } else if (dx_out_port_ax == XT_KEYBOARD) {
                 /* Write to keyboard controller data port (16-bit write) */
                 xt_keyboard_write(&emu->keyboard, dx_out_port_ax, dx_out_value_ax & 0xFF);
@@ -845,6 +878,14 @@ void xt_run(xt_emulator_t *emu) {
         
         /* Execute CPU instruction */
         xt_step(emu);
+        
+        /* Update PIT timer */
+        xt_pit_update(&emu->pit, emu->cpu.cycles);
+        
+        /* Check for timer interrupt */
+        if (emu->cpu.flags & 0x0002) { /* If interrupts enabled */
+            xt_pit_trigger_irq0(&emu->pit, &emu->pic);
+        }
         
         /* Debug output */
         if (instruction_count % 1000 == 0) {

@@ -570,3 +570,172 @@ void xt_keyboard_trigger_irq(struct xt_keyboard *keyboard, struct xt_pic *pic) {
         xt_pic_trigger_irq(pic, 1); /* IRQ 1 - Keyboard */
     }
 }
+
+/* PIT (Programmable Interval Timer) implementation */
+
+/* PIT modes */
+#define XT_PIT_MODE0  0x00  /* Interrupt on terminal count */
+#define XT_PIT_MODE1  0x01  /* Hardware retriggerable one-shot */
+#define XT_PIT_MODE2  0x02  /* Rate generator */
+#define XT_PIT_MODE3  0x03  /* Square wave generator */
+#define XT_PIT_MODE4  0x04  /* Software triggered strobe */
+#define XT_PIT_MODE5  0x05  /* Hardware triggered strobe */
+
+/* PIT command register bits */
+#define XT_PIT_CMD_SC   0x11  /* Select counter */
+#define XT_PIT_CMD_RW   0x12  /* Read/Write mode */
+#define XT_PIT_CMD_MODE 0x13  /* Operating mode */
+#define XT_PIT_CMD_BCD  0x14  /* Binary/BCD count */
+
+/* Initialize PIT */
+void xt_pit_init(struct xt_pit *pit) {
+    /* Clear all PIT registers */
+    memset(pit, 0, sizeof(struct xt_pit));
+    
+    /* Initialize channels */
+    for (int i = 0; i < 3; i++) {
+        pit->channels[i].counter = 0xFFFF;
+        pit->channels[i].latch = 0xFFFF;
+        pit->channels[i].mode = XT_PIT_MODE0;
+        pit->channels[i].bcd = false;
+        pit->channels[i].read_back = false;
+        pit->channels[i].status = 0x00;
+    }
+    
+    /* Set control register */
+    pit->control = 0x00;
+    
+    /* Set initial state */
+    pit->initialized = true;
+    pit->last_tick = 0;
+    pit->tick_count = 0;
+    pit->timer_running = false;
+    
+    printf("PIT initialized\n");
+}
+
+/* Write to PIT register */
+void xt_pit_write(struct xt_pit *pit, uint16_t port, uint8_t value) {
+    uint8_t channel = port - XT_PIT_BASE;
+    
+    if (channel > 2) {
+        return; /* Invalid channel */
+    }
+    
+    if (port == XT_PIT_BASE) {
+        /* Control register write */
+        pit->control = value;
+        
+        uint8_t sc = (value >> 6) & 0x03;    /* Select counter */
+        uint8_t rw = (value >> 4) & 0x03;    /* Read/Write mode */
+        uint8_t mode = (value >> 1) & 0x07;  /* Operating mode */
+        uint8_t bcd = (value & 0x01);        /* Binary/BCD */
+        
+        printf("PIT control write: SC=%d, RW=%d, Mode=%d, BCD=%d\n", sc, rw, mode, bcd);
+        
+        if (sc < 3) {
+            pit->channels[sc].command = value;
+            pit->channels[sc].mode = mode;
+            pit->channels[sc].bcd = bcd;
+        }
+    } else {
+        /* Counter register write */
+        uint8_t counter = channel;
+        
+        switch (pit->channels[counter].command & 0x30) {
+            case 0x00: /* Latch counter only */
+                pit->channels[counter].latch = value;
+                break;
+                
+            case 0x10: /* Write low byte only */
+                pit->channels[counter].counter = (pit->channels[counter].counter & 0xFF00) | value;
+                break;
+                
+            case 0x20: /* Write high byte only */
+                pit->channels[counter].counter = (pit->channels[counter].counter & 0x00FF) | (value << 8);
+                break;
+                
+            case 0x30: /* Write low then high byte */
+                pit->channels[counter].counter = (pit->channels[counter].counter & 0x00FF) | (value << 8);
+                break;
+        }
+        
+        printf("PIT channel %d counter write: 0x%04X\n", counter, pit->channels[counter].counter);
+        
+        /* Start timer if channel 0 is programmed */
+        if (counter == 0 && pit->channels[0].counter > 0) {
+            pit->timer_running = true;
+            pit->last_tick = 0;
+            printf("PIT timer started with counter: %d\n", pit->channels[0].counter);
+        }
+    }
+}
+
+/* Read from PIT register */
+uint8_t xt_pit_read(struct xt_pit *pit, uint16_t port) {
+    uint8_t channel = port - XT_PIT_BASE;
+    
+    if (channel > 2) {
+        return 0xFF; /* Invalid channel */
+    }
+    
+    if (port == XT_PIT_BASE) {
+        /* Control register read - return status */
+        return pit->control;
+    } else {
+        /* Counter register read */
+        uint8_t counter = channel;
+        uint8_t value = 0;
+        
+        switch (pit->channels[counter].command & 0x30) {
+            case 0x00: /* Latch counter only */
+                value = pit->channels[counter].latch & 0xFF;
+                break;
+                
+            case 0x10: /* Read low byte only */
+                value = pit->channels[counter].counter & 0xFF;
+                break;
+                
+            case 0x20: /* Read high byte only */
+                value = (pit->channels[counter].counter >> 8) & 0xFF;
+                break;
+                
+            case 0x30: /* Read low byte then high byte */
+                value = pit->channels[counter].counter & 0xFF;
+                break;
+        }
+        
+        printf("PIT channel %d counter read: 0x%02X\n", counter, value);
+        return value;
+    }
+}
+
+/* Update PIT state and check for timer interrupts */
+void xt_pit_update(struct xt_pit *pit, uint32_t cycles) {
+    if (!pit->timer_running || pit->channels[0].counter == 0) {
+        return;
+    }
+    
+    /* Channel 0 is used for system timer interrupts */
+    uint16_t channel0_counter = pit->channels[0].counter;
+    
+    /* Calculate timer frequency: 1.193182 MHz XT clock */
+    /* Timer interrupt occurs every 65536 cycles at maximum count */
+    uint32_t timer_threshold = channel0_counter;
+    
+    pit->tick_count += cycles;
+    
+    /* Check if timer interrupt should be triggered */
+    if (pit->tick_count >= timer_threshold) {
+        pit->tick_count = 0;
+        printf("PIT timer interrupt triggered (counter: %d)\n", channel0_counter);
+    }
+}
+
+/* Trigger IRQ 0 (timer interrupt) */
+void xt_pit_trigger_irq0(struct xt_pit *pit, struct xt_pic *pic) {
+    if (pit->timer_running && pit->channels[0].counter > 0) {
+        xt_pic_trigger_irq(pic, 0); /* IRQ 0 - System Timer */
+        printf("PIT triggered IRQ 0\n");
+    }
+}
