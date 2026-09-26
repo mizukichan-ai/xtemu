@@ -87,6 +87,10 @@ struct xt_keyboard {
     uint8_t     keyboard_buffer[16];
     uint8_t     buffer_head;
     uint8_t     buffer_tail;
+    uint8_t     status_port;
+    uint8_t     data_port;
+    bool        keyboard_enabled;
+    uint8_t     scan_code_set;
 };
 
 /* PIC (Programmable Interrupt Controller) structure */
@@ -147,6 +151,15 @@ uint8_t xt_pic_get_interrupt_vector(struct xt_pic *pic, uint8_t irq);
 void xt_pic_send_eoi(struct xt_pic *pic, uint8_t irq);
 void xt_pic_get_status(struct xt_pic *pic, uint8_t *initialized, uint8_t *slave_initialized, 
                        uint8_t *master_imr, uint8_t *slave_imr);
+
+/* Keyboard Controller functions */
+void xt_keyboard_init(struct xt_keyboard *keyboard);
+void xt_keyboard_write(struct xt_keyboard *keyboard, uint16_t port, uint8_t value);
+uint8_t xt_keyboard_read(struct xt_keyboard *keyboard, uint16_t port);
+void xt_keyboard_handle_sdl_event(struct xt_keyboard *keyboard, SDL_Event *event);
+bool xt_keyboard_has_key(struct xt_keyboard *keyboard);
+uint8_t xt_keyboard_read_scancode(struct xt_keyboard *keyboard);
+void xt_keyboard_trigger_irq(struct xt_keyboard *keyboard, struct xt_pic *pic);
 
 /* Memory management functions */
 void xt_memory_init(xt_memory_t *memory);

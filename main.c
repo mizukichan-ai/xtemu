@@ -122,7 +122,7 @@ int xt_init(xt_emulator_t *emu) {
     emu->display.initialized = true;
     
     /* Initialize keyboard */
-    memset(&emu->keyboard, 0, sizeof(emu->keyboard));
+    xt_keyboard_init(&emu->keyboard);
     
     /* Initialize PIC */
     xt_pic_init(&emu->pic);
@@ -292,6 +292,9 @@ void xt_step(xt_emulator_t *emu) {
             if (in_port == XT_PIC_MASTER || in_port == XT_PIC_MASTER + 1) {
                 /* Read PIC register */
                 in_value = xt_pic_read(&emu->pic, in_port);
+            } else if (in_port == XT_KEYBOARD) {
+                /* Read keyboard controller data port */
+                in_value = xt_keyboard_read(&emu->keyboard, in_port);
             } else {
                 printf("IN from port 0x%02X (AL = 0x%02X)\n", in_port, in_value);
             }
@@ -312,6 +315,11 @@ void xt_step(xt_emulator_t *emu) {
                 uint8_t low = xt_pic_read(&emu->pic, in_port_ax);
                 uint8_t high = xt_pic_read(&emu->pic, in_port_ax + 1);
                 in_value_ax = (high << 8) | low;
+            } else if (in_port_ax == XT_KEYBOARD) {
+                /* Read keyboard controller data port (16-bit read) */
+                uint8_t low = xt_keyboard_read(&emu->keyboard, in_port_ax);
+                uint8_t high = xt_keyboard_read(&emu->keyboard, in_port_ax + 1);
+                in_value_ax = (high << 8) | low;
             } else {
                 printf("IN from port 0x%02X (AX = 0x%04X)\n", in_port_ax, in_value_ax);
             }
@@ -330,6 +338,9 @@ void xt_step(xt_emulator_t *emu) {
             if (out_port == XT_PIC_MASTER || out_port == XT_PIC_MASTER + 1) {
                 /* Write to PIC register */
                 xt_pic_write(&emu->pic, out_port, out_value);
+            } else if (out_port == XT_KEYBOARD) {
+                /* Write to keyboard controller data port */
+                xt_keyboard_write(&emu->keyboard, out_port, out_value);
             } else {
                 printf("OUT to port 0x%02X (value 0x%02X)\n", out_port, out_value);
             }
@@ -348,6 +359,10 @@ void xt_step(xt_emulator_t *emu) {
                 /* Write to PIC register (16-bit write) */
                 xt_pic_write(&emu->pic, out_port_ax, out_value_ax & 0xFF);
                 xt_pic_write(&emu->pic, out_port_ax + 1, (out_value_ax >> 8) & 0xFF);
+            } else if (out_port_ax == XT_KEYBOARD) {
+                /* Write to keyboard controller data port (16-bit write) */
+                xt_keyboard_write(&emu->keyboard, out_port_ax, out_value_ax & 0xFF);
+                xt_keyboard_write(&emu->keyboard, out_port_ax + 1, (out_value_ax >> 8) & 0xFF);
             } else {
                 printf("OUT to port 0x%02X (value 0x%04X)\n", out_port_ax, out_value_ax);
             }
@@ -365,6 +380,9 @@ void xt_step(xt_emulator_t *emu) {
             if (dx_port == XT_PIC_MASTER || dx_port == XT_PIC_MASTER + 1) {
                 /* Read PIC register */
                 dx_in_value = xt_pic_read(&emu->pic, dx_port);
+            } else if (dx_port == XT_KEYBOARD) {
+                /* Read keyboard controller data port */
+                dx_in_value = xt_keyboard_read(&emu->keyboard, dx_port);
             } else {
                 printf("IN from port DX=0x%04X (AL = 0x%02X)\n", dx_port, dx_in_value);
             }
@@ -385,6 +403,11 @@ void xt_step(xt_emulator_t *emu) {
                 uint8_t low = xt_pic_read(&emu->pic, dx_port_ax);
                 uint8_t high = xt_pic_read(&emu->pic, dx_port_ax + 1);
                 dx_in_value_ax = (high << 8) | low;
+            } else if (dx_port_ax == XT_KEYBOARD) {
+                /* Read keyboard controller data port (16-bit read) */
+                uint8_t low = xt_keyboard_read(&emu->keyboard, dx_port_ax);
+                uint8_t high = xt_keyboard_read(&emu->keyboard, dx_port_ax + 1);
+                dx_in_value_ax = (high << 8) | low;
             } else {
                 printf("IN from port DX=0x%04X (AX = 0x%04X)\n", dx_port_ax, dx_in_value_ax);
             }
@@ -403,6 +426,9 @@ void xt_step(xt_emulator_t *emu) {
             if (dx_out_port == XT_PIC_MASTER || dx_out_port == XT_PIC_MASTER + 1) {
                 /* Write to PIC register */
                 xt_pic_write(&emu->pic, dx_out_port, dx_out_value);
+            } else if (dx_out_port == XT_KEYBOARD) {
+                /* Write to keyboard controller data port */
+                xt_keyboard_write(&emu->keyboard, dx_out_port, dx_out_value);
             } else {
                 printf("OUT to port DX=0x%04X (value 0x%02X)\n", dx_out_port, dx_out_value);
             }
@@ -421,6 +447,10 @@ void xt_step(xt_emulator_t *emu) {
                 /* Write to PIC register (16-bit write) */
                 xt_pic_write(&emu->pic, dx_out_port_ax, dx_out_value_ax & 0xFF);
                 xt_pic_write(&emu->pic, dx_out_port_ax + 1, (dx_out_value_ax >> 8) & 0xFF);
+            } else if (dx_out_port_ax == XT_KEYBOARD) {
+                /* Write to keyboard controller data port (16-bit write) */
+                xt_keyboard_write(&emu->keyboard, dx_out_port_ax, dx_out_value_ax & 0xFF);
+                xt_keyboard_write(&emu->keyboard, dx_out_port_ax + 1, (dx_out_value_ax >> 8) & 0xFF);
             } else {
                 printf("OUT to port DX=0x%04X (value 0x%04X)\n", dx_out_port_ax, dx_out_value_ax);
             }
@@ -800,9 +830,15 @@ void xt_run(xt_emulator_t *emu) {
                     break;
                 case SDL_KEYDOWN:
                     /* Handle keyboard input */
+                    xt_keyboard_handle_sdl_event(&emu->keyboard, &event);
+                    /* Trigger keyboard interrupt if key is available */
+                    xt_keyboard_trigger_irq(&emu->keyboard, &emu->pic);
                     break;
                 case SDL_KEYUP:
                     /* Handle keyboard release */
+                    xt_keyboard_handle_sdl_event(&emu->keyboard, &event);
+                    /* Trigger keyboard interrupt if key is available */
+                    xt_keyboard_trigger_irq(&emu->keyboard, &emu->pic);
                     break;
             }
         }
