@@ -124,6 +124,9 @@ int xt_init(xt_emulator_t *emu) {
     /* Initialize keyboard */
     memset(&emu->keyboard, 0, sizeof(emu->keyboard));
     
+    /* Initialize PIC */
+    xt_pic_init(&emu->pic);
+    
     /* Initialize memory */
     xt_memory_init(&emu->memory);
     
@@ -278,6 +281,152 @@ void xt_step(xt_emulator_t *emu) {
             /* Lock prefix - ignore for now */
             emu->cpu.ip += 1;
             emu->cpu.cycles += 2;
+            break;
+            
+        case 0xE4: /* IN AL,imm8 */
+            /* Input from port to AL */
+            uint8_t in_port = xt_memory_read_byte(&emu->memory, cs_ip + 1);
+            uint8_t in_value = 0xFF; /* Default value - will be overridden by actual hardware */
+            
+            /* Handle specific ports */
+            if (in_port == XT_PIC_MASTER || in_port == XT_PIC_MASTER + 1) {
+                /* Read PIC register */
+                in_value = xt_pic_read(&emu->pic, in_port);
+            } else {
+                printf("IN from port 0x%02X (AL = 0x%02X)\n", in_port, in_value);
+            }
+            
+            emu->cpu.ax = (emu->cpu.ax & 0xFF00) | in_value;
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xE5: /* IN AX,imm8 */
+            /* Input from port to AX */
+            uint8_t in_port_ax = xt_memory_read_byte(&emu->memory, cs_ip + 1);
+            uint16_t in_value_ax = 0xFFFF; /* Default value - will be overridden by actual hardware */
+            
+            /* Handle specific ports */
+            if (in_port_ax == XT_PIC_MASTER || in_port_ax == XT_PIC_MASTER + 1) {
+                /* Read PIC register (16-bit read) */
+                uint8_t low = xt_pic_read(&emu->pic, in_port_ax);
+                uint8_t high = xt_pic_read(&emu->pic, in_port_ax + 1);
+                in_value_ax = (high << 8) | low;
+            } else {
+                printf("IN from port 0x%02X (AX = 0x%04X)\n", in_port_ax, in_value_ax);
+            }
+            
+            emu->cpu.ax = in_value_ax;
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xE6: /* OUT imm8,AL */
+            /* Output AL to port */
+            uint8_t out_port = xt_memory_read_byte(&emu->memory, cs_ip + 1);
+            uint8_t out_value = emu->cpu.ax & 0xFF;
+            
+            /* Handle specific ports */
+            if (out_port == XT_PIC_MASTER || out_port == XT_PIC_MASTER + 1) {
+                /* Write to PIC register */
+                xt_pic_write(&emu->pic, out_port, out_value);
+            } else {
+                printf("OUT to port 0x%02X (value 0x%02X)\n", out_port, out_value);
+            }
+            
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xE7: /* OUT imm8,AX */
+            /* Output AX to port */
+            uint8_t out_port_ax = xt_memory_read_byte(&emu->memory, cs_ip + 1);
+            uint16_t out_value_ax = emu->cpu.ax;
+            
+            /* Handle specific ports */
+            if (out_port_ax == XT_PIC_MASTER || out_port_ax == XT_PIC_MASTER + 1) {
+                /* Write to PIC register (16-bit write) */
+                xt_pic_write(&emu->pic, out_port_ax, out_value_ax & 0xFF);
+                xt_pic_write(&emu->pic, out_port_ax + 1, (out_value_ax >> 8) & 0xFF);
+            } else {
+                printf("OUT to port 0x%02X (value 0x%04X)\n", out_port_ax, out_value_ax);
+            }
+            
+            emu->cpu.ip += 2;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xEC: /* IN AL,DX */
+            /* Input from port (DX) to AL */
+            uint16_t dx_port = emu->cpu.dx;
+            uint8_t dx_in_value = 0xFF; /* Default value - will be overridden by actual hardware */
+            
+            /* Handle specific ports */
+            if (dx_port == XT_PIC_MASTER || dx_port == XT_PIC_MASTER + 1) {
+                /* Read PIC register */
+                dx_in_value = xt_pic_read(&emu->pic, dx_port);
+            } else {
+                printf("IN from port DX=0x%04X (AL = 0x%02X)\n", dx_port, dx_in_value);
+            }
+            
+            emu->cpu.ax = (emu->cpu.ax & 0xFF00) | dx_in_value;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xED: /* IN AX,DX */
+            /* Input from port (DX) to AX */
+            uint16_t dx_port_ax = emu->cpu.dx;
+            uint16_t dx_in_value_ax = 0xFFFF; /* Default value - will be overridden by actual hardware */
+            
+            /* Handle specific ports */
+            if (dx_port_ax == XT_PIC_MASTER || dx_port_ax == XT_PIC_MASTER + 1) {
+                /* Read PIC register (16-bit read) */
+                uint8_t low = xt_pic_read(&emu->pic, dx_port_ax);
+                uint8_t high = xt_pic_read(&emu->pic, dx_port_ax + 1);
+                dx_in_value_ax = (high << 8) | low;
+            } else {
+                printf("IN from port DX=0x%04X (AX = 0x%04X)\n", dx_port_ax, dx_in_value_ax);
+            }
+            
+            emu->cpu.ax = dx_in_value_ax;
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xEE: /* OUT DX,AL */
+            /* Output AL to port (DX) */
+            uint16_t dx_out_port = emu->cpu.dx;
+            uint8_t dx_out_value = emu->cpu.ax & 0xFF;
+            
+            /* Handle specific ports */
+            if (dx_out_port == XT_PIC_MASTER || dx_out_port == XT_PIC_MASTER + 1) {
+                /* Write to PIC register */
+                xt_pic_write(&emu->pic, dx_out_port, dx_out_value);
+            } else {
+                printf("OUT to port DX=0x%04X (value 0x%02X)\n", dx_out_port, dx_out_value);
+            }
+            
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 10;
+            break;
+            
+        case 0xEF: /* OUT DX,AX */
+            /* Output AX to port (DX) */
+            uint16_t dx_out_port_ax = emu->cpu.dx;
+            uint16_t dx_out_value_ax = emu->cpu.ax;
+            
+            /* Handle specific ports */
+            if (dx_out_port_ax == XT_PIC_MASTER || dx_out_port_ax == XT_PIC_MASTER + 1) {
+                /* Write to PIC register (16-bit write) */
+                xt_pic_write(&emu->pic, dx_out_port_ax, dx_out_value_ax & 0xFF);
+                xt_pic_write(&emu->pic, dx_out_port_ax + 1, (dx_out_value_ax >> 8) & 0xFF);
+            } else {
+                printf("OUT to port DX=0x%04X (value 0x%04X)\n", dx_out_port_ax, dx_out_value_ax);
+            }
+            
+            emu->cpu.ip += 1;
+            emu->cpu.cycles += 10;
             break;
             
         case 0x00: /* ADD AL,imm8 */

@@ -24,6 +24,27 @@
 #define XT_DMA_BASE   0x00
 #define XT_KEYBOARD   0x60
 
+/* PIC register offsets */
+#define XT_PIC_ICW1       0x20
+#define XT_PIC_OCW2       0x20
+#define XT_PIC_OCW3       0x20
+#define XT_PIC_ICW2       0x21
+#define XT_PIC_ICW3       0x21
+#define XT_PIC_ICW4       0x21
+#define XT_PIC_ISR        0x20
+#define XT_PIC_IMR        0x21
+#define XT_PIC_IRR        0x20
+
+#define XT_PIC_SLAVE_ICW1 0xA0
+#define XT_PIC_SLAVE_OCW2 0xA0
+#define XT_PIC_SLAVE_OCW3 0xA0
+#define XT_PIC_SLAVE_ICW2 0xA1
+#define XT_PIC_SLAVE_ICW3 0xA1
+#define XT_PIC_SLAVE_ICW4 0xA1
+#define XT_PIC_SLAVE_ISR   0xA0
+#define XT_PIC_SLAVE_IMR   0xA1
+#define XT_PIC_SLAVE_IRR   0xA0
+
 /* Video modes */
 #define XT_VGA_WIDTH  640
 #define XT_VGA_HEIGHT 480
@@ -68,12 +89,43 @@ struct xt_keyboard {
     uint8_t     buffer_tail;
 };
 
+/* PIC (Programmable Interrupt Controller) structure */
+struct xt_pic {
+    /* Master PIC */
+    uint8_t icw1;
+    uint8_t icw2;
+    uint8_t icw3;
+    uint8_t icw4;
+    uint8_t imr;
+    uint8_t irr;
+    uint8_t isr;
+    uint8_t auto_eoi;
+    uint8_t read_isr;
+    
+    /* Slave PIC */
+    uint8_t slave_icw1;
+    uint8_t slave_icw2;
+    uint8_t slave_icw3;
+    uint8_t slave_icw4;
+    uint8_t slave_imr;
+    uint8_t slave_irr;
+    uint8_t slave_isr;
+    uint8_t slave_auto_eoi;
+    uint8_t slave_read_isr;
+    
+    /* State */
+    bool initialized;
+    bool slave_initialized;
+    uint8_t cascade_vector;
+};
+
 /* Main emulator state */
 typedef struct {
     xt_cpu_t cpu;
     xt_memory_t memory;
     xt_display_t display;
     xt_keyboard_t keyboard;
+    struct xt_pic pic;
     bool     running;
     bool     debug_mode;
 } xt_emulator_t;
@@ -84,6 +136,17 @@ void xt_cleanup(xt_emulator_t *emu);
 void xt_reset(xt_emulator_t *emu);
 void xt_step(xt_emulator_t *emu);
 void xt_run(xt_emulator_t *emu);
+
+/* PIC (Programmable Interrupt Controller) functions */
+void xt_pic_init(struct xt_pic *pic);
+void xt_pic_write(struct xt_pic *pic, uint16_t port, uint8_t value);
+uint8_t xt_pic_read(struct xt_pic *pic, uint16_t port);
+void xt_pic_trigger_irq(struct xt_pic *pic, uint8_t irq);
+int xt_pic_get_highest_irq(struct xt_pic *pic);
+uint8_t xt_pic_get_interrupt_vector(struct xt_pic *pic, uint8_t irq);
+void xt_pic_send_eoi(struct xt_pic *pic, uint8_t irq);
+void xt_pic_get_status(struct xt_pic *pic, uint8_t *initialized, uint8_t *slave_initialized, 
+                       uint8_t *master_imr, uint8_t *slave_imr);
 
 /* Memory management functions */
 void xt_memory_init(xt_memory_t *memory);

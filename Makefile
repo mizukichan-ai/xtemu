@@ -3,10 +3,9 @@ CFLAGS = -std=c99 -Wall -Wextra -O2 -g -I/opt/homebrew/opt/sdl2-compat/include
 LDFLAGS = -L/opt/homebrew/opt/sdl2-compat/lib -lSDL2
 TARGET = xtemu
 BIOSGEN = biosgen
-SOURCES = $(wildcard *.c)
+SOURCES = main.c memory.c hardware.c
 BIOSGEN_SOURCES = biosgen.c
-MAIN_SOURCES = main.c
-OBJECTS = $(filter-out $(BIOSGEN).o, $(SOURCES:.c=.o))
+OBJECTS = $(SOURCES:.c=.o)
 BIOSGEN_OBJS = $(BIOSGEN_SOURCES:.c=.o)
 
 .PHONY: all clean $(TARGET) $(BIOSGEN)
