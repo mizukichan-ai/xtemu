@@ -15,21 +15,27 @@ A faithful emulator for the IBM XT personal computer, written in C99 using SDL2 
 
 ## Build Requirements
 
-- macOS on arm64
-- Clang compiler
+- C99-compatible compiler
 - SDL2 development libraries
 - SDL2_mixer development libraries
 
 ## Installation
 
-### Install dependencies on macOS
+### Install dependencies
 
+**macOS (Homebrew):**
 ```bash
-# Install Homebrew if not already installed
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install SDL2 and SDL2_mixer
 brew install sdl2 sdl2_mixer
+```
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt-get install libsdl2-dev libsdl2-mixer-dev
+```
+
+**Linux (Fedora/CentOS):**
+```bash
+sudo dnf install SDL2-devel SDL2_mixer-devel
 ```
 
 ### Build the emulator
@@ -80,7 +86,9 @@ make install
 
 - `main.c` - Main emulator logic and CPU emulation
 - `xtemu.h` - Header file with data structures and function prototypes
+- `hardware.c` - Hardware emulation (PIC, Keyboard, Timer, DMA)
 - `Makefile` - Build configuration
+- `ROADMAP.md` - Development roadmap and progress
 - `IDEA.md` - Project details and specifications
 
 ## Goals
@@ -95,6 +103,7 @@ The goal is to create a faithful enough implementation to boot any XT-supported 
 - IBM Enhanced Graphics Adapter
 - MZFlop floppy controller (two 720KB drives)
 - MZDisk XTA controller (accepts up to 40MB raw image)
+- PIC, Keyboard Controller, System Timer, DMA Controller
 
 ## License
 
