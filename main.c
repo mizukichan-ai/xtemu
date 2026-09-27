@@ -88,6 +88,14 @@ int xt_init(xt_emulator_t *emu) {
     }
     
     /* Initialize display */
+    xt_display_init(&emu->display);
+    
+    if (!emu->display.initialized) {
+        fprintf(stderr, "Display initialization failed\n");
+        return -1;
+    }
+    
+    /* Create SDL window and renderer (this will be moved to display.c later) */
     emu->display.window = SDL_CreateWindow("xtemu - IBM XT Emulator",
                                           SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED,
@@ -119,7 +127,8 @@ int xt_init(xt_emulator_t *emu) {
         return -1;
     }
     
-    emu->display.initialized = true;
+    /* Initialize display with default video mode */
+    xt_display_set_video_mode(&emu->display, XT_VIDEO_MODE_TEXT_80x25);
     
     /* Initialize keyboard */
     xt_keyboard_init(&emu->keyboard);
@@ -152,18 +161,8 @@ int xt_init(xt_emulator_t *emu) {
 
 /* Cleanup emulator */
 void xt_cleanup(xt_emulator_t *emu) {
-    if (emu->display.texture) {
-        SDL_DestroyTexture(emu->display.texture);
-    }
-    if (emu->display.renderer) {
-        SDL_DestroyRenderer(emu->display.renderer);
-    }
-    if (emu->display.window) {
-        SDL_DestroyWindow(emu->display.window);
-    }
-    if (emu->display.framebuffer) {
-        free(emu->display.framebuffer);
-    }
+    /* Cleanup display */
+    xt_display_cleanup(&emu->display);
     
     SDL_Quit();
 }
@@ -929,12 +928,11 @@ void xt_run(xt_emulator_t *emu) {
         
         /* Update display */
         if (emu->display.initialized) {
-            SDL_UpdateTexture(emu->display.texture, NULL, 
-                            emu->display.framebuffer, 
-                            XT_VGA_WIDTH * 4);
-            SDL_RenderClear(emu->display.renderer);
-            SDL_RenderCopy(emu->display.renderer, emu->display.texture, NULL, NULL);
-            SDL_RenderPresent(emu->display.renderer);
+            /* Render text mode from video memory */
+            xt_display_render_text_mode(&emu->display, &emu->memory, &emu->cpu);
+            
+            /* Update SDL display */
+            xt_display_update(&emu->display);
         }
         
         /* Control emulation speed */

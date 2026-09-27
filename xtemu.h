@@ -49,6 +49,40 @@
 #define XT_VGA_WIDTH  640
 #define XT_VGA_HEIGHT 480
 
+/* Video text mode constants */
+#define XT_TEXT_WIDTH    80
+#define XT_TEXT_HEIGHT   25
+#define XT_TEXT_CHARS    (XT_TEXT_WIDTH * XT_TEXT_HEIGHT)
+
+/* Video memory addresses */
+#define XT_VIDEO_RAM_START    0xB8000
+#define XT_VIDEO_RAM_SIZE     32768  /* 32KB for text mode */
+
+/* Video modes */
+#define XT_VIDEO_MODE_TEXT_80x25    0x03
+#define XT_VIDEO_MODE_TEXT_40x25    0x02
+#define XT_VIDEO_MODE_CGA_320x200   0x04
+#define XT_VIDEO_MODE_CGA_640x350   0x0D
+#define XT_VIDEO_MODE_VGA_640x480   0x12
+
+/* Color palette (CGA) */
+#define XT_COLOR_BLACK     0x00
+#define XT_COLOR_BLUE      0x01
+#define XT_COLOR_GREEN     0x02
+#define XT_COLOR_CYAN      0x03
+#define XT_COLOR_RED       0x04
+#define XT_COLOR_MAGENTA   0x05
+#define XT_COLOR_BROWN     0x06
+#define XT_COLOR_LIGHT_GRAY 0x07
+#define XT_COLOR_DARK_GRAY  0x08
+#define XT_COLOR_LIGHT_BLUE 0x09
+#define XT_COLOR_LIGHT_GREEN 0x0A
+#define XT_COLOR_LIGHT_CYAN 0x0B
+#define XT_COLOR_LIGHT_RED  0x0C
+#define XT_COLOR_LIGHT_MAGENTA 0x0D
+#define XT_COLOR_YELLOW     0x0E
+#define XT_COLOR_WHITE      0x0F
+
 /* Forward declarations */
 typedef struct xt_cpu xt_cpu_t;
 typedef struct xt_memory xt_memory_t;
@@ -79,6 +113,22 @@ struct xt_display {
     SDL_Texture *texture;
     uint8_t *framebuffer;
     bool     initialized;
+    
+    /* Video mode information */
+    uint8_t  video_mode;
+    uint16_t text_width;
+    uint16_t text_height;
+    uint16_t char_width;
+    uint16_t char_height;
+    
+    /* Text mode state */
+    uint16_t cursor_x;
+    uint16_t cursor_y;
+    bool     cursor_visible;
+    uint8_t  cursor_shape;
+    
+    /* Color palette */
+    uint32_t colors[16];
 };
 
 /* Keyboard structure */
@@ -249,5 +299,14 @@ void xt_memory_dump_range(xt_memory_t *memory, uint32_t start, uint32_t end, uin
 void xt_memory_get_stats(xt_memory_t *memory, uint32_t *total_ram, uint32_t *total_video, uint32_t *total_bios);
 bool xt_memory_validate_stack_segment(xt_cpu_t *cpu, uint16_t stack_segment, uint16_t stack_pointer);
 bool xt_memory_check_stack_bounds(xt_cpu_t *cpu, uint16_t stack_size);
+
+/* Video display functions */
+void xt_display_init(xt_display_t *display);
+void xt_display_cleanup(xt_display_t *display);
+void xt_display_update(xt_display_t *display);
+void xt_display_render_text_mode(xt_display_t *display, xt_memory_t *memory, xt_cpu_t *cpu);
+void xt_display_set_video_mode(xt_display_t *display, uint8_t mode);
+uint8_t xt_display_get_video_mode(xt_display_t *display);
+void xt_display_update_cursor(xt_display_t *display, uint16_t x, uint16_t y);
 
 #endif /* XTEMU_H */
