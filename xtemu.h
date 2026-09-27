@@ -126,6 +126,7 @@ struct xt_display {
     uint16_t cursor_y;
     bool     cursor_visible;
     uint8_t  cursor_shape;
+    uint8_t  current_attribute;
     
     /* Color palette */
     uint32_t colors[16];
@@ -308,5 +309,10 @@ void xt_display_render_text_mode(xt_display_t *display, xt_memory_t *memory, xt_
 void xt_display_set_video_mode(xt_display_t *display, uint8_t mode);
 uint8_t xt_display_get_video_mode(xt_display_t *display);
 void xt_display_update_cursor(xt_display_t *display, uint16_t x, uint16_t y);
+void xt_display_scroll_up(xt_display_t *display, xt_memory_t *memory);
+void xt_display_scroll_down(xt_display_t *display, xt_memory_t *memory);
+void xt_display_insert_char(xt_display_t *display, xt_memory_t *memory, char character);
+void xt_display_set_cursor(xt_display_t *display, uint8_t x, uint8_t y);
+void xt_display_set_attribute(xt_display_t *display, uint8_t attribute);
 
 #endif /* XTEMU_H */
